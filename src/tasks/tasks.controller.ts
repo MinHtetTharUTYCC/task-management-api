@@ -11,13 +11,13 @@ export class TasksController {
     @UseGuards(AuthGuard)
     @Post()
     createTask(@Body(ValidationPipe) createTaskDto: CreateTaskDto, @Request() req: { user: { sub: string; email: string } }) {
-        console.log("REQ:", req.user)
         return this.taskService.createTask(createTaskDto, req.user.sub)
     }
 
+    @UseGuards(AuthGuard)
     @Get()
-    getAllTasks() {
-        return this.taskService.getAllTasks()
+    getMyTasks(@Request() req: { user: { sub: string; email: string } }) {
+        return this.taskService.getMyTasks(req.user.sub)
     }
 
     @UseGuards(AuthGuard)

@@ -1,69 +1,123 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { DatabaseService } from 'src/database/database.service';
+import { Task } from 'generated/prisma';
 
 @Injectable()
 export class TasksService {
     constructor(private readonly databaseService: DatabaseService) { }
 
-    // need to edit to specific user
-    async getAllTasks() {
-        return await this.databaseService.task.findMany()
+    async getMyTasks(userId: string): Promise<Task[]> {
+        this.validateUserId(userId);
+        try {
+            return this.databaseService.task.findMany(
+                {
+                    where: { userId },
+                    orderBy: { createdAt: 'desc' }
+                }
+            )
+        } catch (error) {
+            throw new InternalServerErrorException("Failed to get tasks")
+
+        }
     }
 
-    async findUserTask(id: string, userId: string) {
+    async getTask(id: string, userId: string): Promise<Task> {
+        this.validateUserId(userId);
+        this.validateTaskId(id)
+
+        try {
+            const task = await this.databaseService.task.findFirst({
+                where: { id, userId }
+            })
+            if (!task) throw new NotFoundException("Task with ID ${id} not found or you don't have access to it")
+            return task;
+        } catch {
+            throw new InternalServerErrorException("Failed to get task")
+        }
+    }
+
+    async createTask(createTaskDto: CreateTaskDto, userId: string): Promise<Task> {
+        this.validateUserId(userId);
+        try {
+            const newTask = await this.databaseService.task.create({
+                data: {
+                    ...createTaskDto,
+                    userId,
+                }
+            })
+            return newTask;
+        } catch {
+            throw new InternalServerErrorException("Failed to create new task")
+        }
+    }
+
+    async updateTask(id: string, updateTaskDto: UpdateTaskDto, userId: string) {
+        this.validateUserId(userId);
+        this.validateTaskId(id);
+
+        await this.validateTaskOwnership(id, userId)
+
+        try {
+            return this.databaseService.task.update({
+                where: { id },
+                data: updateTaskDto,
+            })
+        } catch {
+            throw new InternalServerErrorException("Failed to create new task")
+        }
+    }
+
+    async deleteTask(id: string, userId: string) {
+        this.validateUserId(userId);
+        this.validateTaskId(id);
+
+        await this.validateTaskOwnership(id, userId);
+
+        try {
+            await this.databaseService.task.delete({
+                where: {
+                    id
+                }
+            })
+            return { success: true, message: "Task deleted successfully" }
+        } catch {
+            throw new InternalServerErrorException("Failed to create new task")
+        }
+    }
+
+    async counMyTasks(userId: string): Promise<number> {
+        try {
+            return this.databaseService.task.count({
+                where: { userId }
+            })
+        } catch {
+            throw new InternalServerErrorException("Failed to create new task")
+        }
+    }
+
+    //helpers
+    async validateTaskOwnership(id: string, userId: string): Promise<void> {
         const task = await this.databaseService.task.findFirst({
             where: { id, userId },
             select: {
                 id: true,
             }
         })
-        if (!task) throw new NotFoundException("Task Not Found")
-        return task;
-
+        if (!task) throw new NotFoundException(`Task with ID ${id} not found or you don't have access to it`)
     }
 
-    async getTask(id: string, userId: string) {
-        const task = await this.databaseService.task.findFirst({
-            where: { id, userId }
-        })
-        if (!task) throw new NotFoundException("Task Not Found")
-        return task;
+    private validateUserId(userId: string): void {
+        if (!userId || userId.trim().length === 0) {
+            throw new BadRequestException('User ID is required');
+        }
     }
 
-    async createTask(createTaskDto: CreateTaskDto, userId: string) {
-        const newTask = await this.databaseService.task.create({
-            data: {
-                ...createTaskDto,
-                userId,
-
-            }
-        })
-        return newTask;
-    }
-
-    async updateTask(id: string, updateTaskDto: UpdateTaskDto, userId: string) {
-        const taskToUpdate = await this.findUserTask(id, userId);
-
-        const updatedTask = await this.databaseService.task.update({
-            where: { id: taskToUpdate.id },
-            data: updateTaskDto,
-        })
-
-        return updatedTask; //Or return this.getTask(id,userId)
-
-    }
-
-    async deleteTask(id: string, userId: string) {
-        const taskToDelete = await this.findUserTask(id, userId)
-        await this.databaseService.task.delete({
-            where: {
-                id: taskToDelete.id,
-            }
-        })
-
-        return { success: true, message: "Task deleted successfully" }
+    private validateTaskId(taskId: string): void {
+        if (!taskId || taskId.trim().length === 0) {
+            throw new BadRequestException('Task ID is required');
+        }
     }
 
 
