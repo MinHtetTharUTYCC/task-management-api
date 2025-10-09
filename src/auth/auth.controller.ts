@@ -21,7 +21,7 @@ export class AuthController {
         return this.authService.login(loginDto)
     }
 
-    @UseGuards(AuthGuard)
+    // testing purpose
     @Get('users')
     getAllUsers() {
         return this.authService.getAllUsers()
