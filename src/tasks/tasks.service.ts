@@ -2,12 +2,17 @@ import { BadRequestException, ForbiddenException, Injectable, InternalServerErro
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { DatabaseService } from 'src/database/database.service';
-import { Task } from 'generated/prisma';
+import { NotificationType, Task, TaskStatus, UserRole } from '@prisma/client';
 import { UpdateTaskStatusDto } from './dto/update-task-status.dto';
 import { RequestUser } from 'src/auth/request-user.interface';
 import { AdminTaskService } from './admin-task/admin-task.service';
 import { ManagerTaskService } from './manager-task/manager-task.service';
 import { MemberTaskService } from './member-task/member-task.service';
+import { GetTasksDto } from './dto/get-tasks.dto';
+import { NotificationsService } from 'src/notifications/notifications.service';
+import { CreateNotificationDto } from 'src/notifications/dto/create-noti.dto';
+import { NotificationsGateway } from 'src/notifications/notifications.gateway';
+import { handlePrismaError } from 'src/utils/handle-prisma-error';
 
 @Injectable()
 export class TasksService {
@@ -16,19 +21,22 @@ export class TasksService {
         private readonly adminTaskService: AdminTaskService,
         private readonly managerTaskService: ManagerTaskService,
         private readonly memberTaskService: MemberTaskService,
+
+        private readonly notificationService: NotificationsService,
+        private readonly notificationsGateway: NotificationsGateway,
+
     ) { }
 
     //ALL autehnticated Users
-    async getTasks(user: RequestUser) {
-        this.validateUserId(user.sub);//do we really need this?
+    async getTasks(getTasksDto: GetTasksDto, user: RequestUser) {
 
         switch (user.role) {
             case 'ADMIN':
-                return this.adminTaskService.getAllTasks();
+                return this.adminTaskService.getAllTasks(getTasksDto);
             case 'MANAGER':
-                return this.managerTaskService.getTasks(user.sub);
+                return this.managerTaskService.getTasks(getTasksDto, user.sub);
             case 'MEMBER':
-                return this.memberTaskService.getTasks(user.sub);
+                return this.memberTaskService.getTasks(getTasksDto, user.sub);
             default:
                 throw new ForbiddenException("You don't have access to this resource")
         }
@@ -36,7 +44,6 @@ export class TasksService {
 
     // All Authenticated Users
     async getTask(id: string, user: RequestUser) {
-        this.validateUserId(user.sub);
         this.validateTaskId(id);
 
         switch (user.role) {
@@ -49,92 +56,148 @@ export class TasksService {
             default:
                 throw new ForbiddenException("You don't have access to this resource")
         }
-
     }
 
     // ADMIN_MANAGER
     async createTask(createTaskDto: CreateTaskDto, creatorId: string): Promise<Task> {
-        this.validateUserId(creatorId);
         try {
-            const newTask = await this.databaseService.task.create({
-                data: {
-                    ...createTaskDto,
-                    creatorId,
+            const [task, createNotificationDto] = await this.databaseService.$transaction(async (tx) => {
+                const newTask = await tx.task.create({
+                    data: { ...createTaskDto, creatorId },
+                });
+
+                await tx.projectMember.upsert({
+                    where: { projectId_userId: { projectId: createTaskDto.projectId, userId: createTaskDto.assigneeId } },
+                    update: {},
+                    create: { projectId: createTaskDto.projectId, userId: createTaskDto.assigneeId },
+                });
+
+                const createNotificationDto: CreateNotificationDto = {
+                    message: "You are assinged to a task",
+                    type: NotificationType.TASK_ASSIGNED,
+                    link: `/tasks/${newTask.id}`,
+                    userId: newTask.assigneeId,
                 }
-            })
-            return newTask;
+
+                await this.notificationService.createNotification(createNotificationDto)
+                return [newTask, createNotificationDto];
+            });
+
+            this.notificationsGateway.sendNotification(createNotificationDto)
+
+            return task;
         } catch {
             throw new InternalServerErrorException("Failed to create new task")
         }
     }
 
     // ADMIN_MANAGER
-    async updateTask(id: string, updateTaskDto: UpdateTaskDto, user: RequestUser) {
-        this.validateUserId(user.sub);
+    async updateTask(id: string, updateTaskDto: UpdateTaskDto, user: RequestUser): Promise<Task> {
         this.validateTaskId(id);
 
-        const task = await this.validateTask(id);
-
-        const isCreator = task.creatorId === user.sub;
-        const isAdmin = user.role === 'ADMIN';
-
-        if (!isCreator && !isAdmin) {
-            throw new ForbiddenException(`You cannot update this task`)
-        }
-
         try {
-            return this.databaseService.task.update({
-                where: { id },
-                data: updateTaskDto,
-            })
-        } catch {
-            throw new InternalServerErrorException("Failed to update task")
+            const task = await this.validateTask(id);
+            const isCreator = task.creatorId === user.sub;
+            const isAdmin = user.role === 'ADMIN';
+
+            if (!isCreator && !isAdmin) {
+                throw new ForbiddenException(`You cannot update this task`)
+            }
+
+
+            const taskUpdate = await this.databaseService.$transaction(async (tx) => {
+                const task = await tx.task.update({
+                    where: { id },
+                    data: updateTaskDto,
+                });
+
+                const baseNotification: { type: NotificationType, link: string } = {
+                    type: NotificationType.TASK_UPDATED,
+                    link: `/tasks/${task.id}`,
+                }
+
+                const recepients: { role: string, id: string, message: string }[] = [
+                    { role: "assignee", id: task.assigneeId, message: "A task assigned to you has been updated" },
+                ]
+                if (isAdmin && !isCreator) {
+                    recepients.push({ role: "manager", id: task.creatorId, message: "Admin updated your task" })
+                }
+
+                const notifications = await Promise.all(
+                    recepients.map((rec) =>
+                        this.notificationService.createNotification({ ...baseNotification, message: rec.message, userId: rec.id })
+                    )
+                )
+                return { task, notifications };
+            });
+
+            for (const notification of taskUpdate.notifications) {
+                this.notificationsGateway.sendNotification(notification)
+            }
+
+            return taskUpdate.task;
+
+        } catch (error) {
+            handlePrismaError(error, "Failed to update task")
         }
     }
 
     //All Authenticated Users
-    async updateTaskStatus(id: string, updateTaskStatusDto: UpdateTaskStatusDto, user: RequestUser) {
-        this.validateUserId(user.sub);
+    async updateTaskStatus(id: string, updateTaskStatusDto: UpdateTaskStatusDto, user: RequestUser): Promise<{ newStatus: TaskStatus }> {
         this.validateTaskId(id);
-
-        const task = await this.validateTask(id);
-
-        const isAssignee = task.assigneeId === user.sub;
-        const isCreator = task.creatorId === user.sub;
-        const isAdmin = user.role === 'ADMIN';
-
-        if (!isAssignee && !isCreator && !isAdmin) {
-            throw new ForbiddenException(`You cannot update this task status`)
-        }
-
         try {
-            return this.databaseService.task.update({
-                where: { id },
-                data: updateTaskStatusDto,
-            })
-        } catch {
-            throw new InternalServerErrorException("Failed to update task status")
+            const existingTask = await this.validateTask(id);
+            const isAssignee = existingTask.assigneeId === user.sub;
+            const isCreator = existingTask.creatorId === user.sub;
+            const isAdmin = user.role === 'ADMIN';
+
+            if (!isAssignee && !isCreator && !isAdmin) {
+                throw new ForbiddenException(`You cannot update this task status`)
+            }
+
+            const taskUpdate = await this.databaseService.$transaction(async (tx) => {
+                const task = await tx.task.update({
+                    where: { id },
+                    data: updateTaskStatusDto,
+                    select: { status: true }
+                });
+
+                const createNotificationDto: CreateNotificationDto = {
+                    message: `Task status updated to ${updateTaskStatusDto.status}`,
+                    type: updateTaskStatusDto.status === "DONE" ? NotificationType.TASK_COMPLETED : NotificationType.TASK_UPDATED,
+                    link: `/tasks/${id}`,
+                    userId: isAssignee ? existingTask.creatorId : existingTask.assigneeId,
+                };
+
+                //if admin update, do not notify to manager
+                const notification = await this.notificationService.createNotification(createNotificationDto);
+
+                return { task, notification }
+            });
+
+            //if admin updates, do not notify to manager
+            this.notificationsGateway.sendNotification(taskUpdate.notification)
+
+            return { newStatus: taskUpdate.task.status };
+        } catch (error) {
+            handlePrismaError(error, "Failed to update task status")
         }
     }
 
     // ADMIN_MANAGER
-    async deleteTask(id: string, creatorId: string, role: string) {
-        this.validateUserId(creatorId);
+    async deleteTask(id: string, user: RequestUser): Promise<{ message: string }> {
         this.validateTaskId(id);
 
-        if (role !== 'ADMIN') {
-            await this.validateTaskCreatorship(id, creatorId)
-        }
-
         try {
+            await this.validateTaskAndCreatorship(id, user.sub, user.role as UserRole)
             await this.databaseService.task.delete({
                 where: {
                     id
                 }
             })
-            return { success: true, message: "Task deleted successfully" }
-        } catch {
-            throw new InternalServerErrorException("Failed to delete task")
+            return { message: "Task deleted successfully" }
+        } catch (error) {
+            handlePrismaError(error, "Failed to delete task")
         }
     }
 
@@ -151,15 +214,20 @@ export class TasksService {
 
 
     //helpers
-    async validateTaskCreatorship(id: string, creatorId: string): Promise<void> {
+    async validateTaskAndCreatorship(id: string, creatorId: string, role: UserRole): Promise<void> {
         const task = await this.databaseService.task.findUnique({
-            where: { id, creatorId },
+            where: { id },
             select: {
                 id: true,
+                creatorId: true,
             }
         })
-        if (!task) throw new NotFoundException(`Task with ID ${id} not found or you don't have access to it`)
+        if (!task) throw new NotFoundException(`Task not found`)
+        if (role !== 'ADMIN' && task.creatorId !== creatorId) {
+            throw new ForbiddenException(`You cannot access this task`)
+        }
     }
+
     async validateTaskAssigneeship(id: string, assigneeId: string): Promise<void> {
         const task = await this.databaseService.task.findUnique({
             where: { id, assigneeId },
@@ -174,15 +242,10 @@ export class TasksService {
         const task = await this.databaseService.task.findUnique({
             where: { id }, select: { assigneeId: true, creatorId: true }
         });
-        if (!task) throw new NotFoundException(`Task with ID ${id} not found`)
+        if (!task) throw new NotFoundException(`Task not found`)
         return { assigneeId: task.assigneeId, creatorId: task.creatorId };
     }
 
-    private validateUserId(userId: string): void {
-        if (!userId || userId.trim().length === 0) {
-            throw new BadRequestException('User ID is required');
-        }
-    }
     private validateTaskId(taskId: string): void {
         if (!taskId || taskId.trim().length === 0) {
             throw new BadRequestException('Task ID is required');

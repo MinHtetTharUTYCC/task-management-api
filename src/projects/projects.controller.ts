@@ -11,14 +11,14 @@ import { UpdateProjectDto } from './dto/update-project.dto';
 export class ProjectsController {
     constructor(private readonly projectsService: ProjectsService) { }
 
-    @Auth('ADMIN')
+    @Auth()
     @Get()
-    getAllProjects() {
-        return this.projectsService.getAllProjects();
+    getAllProjects(@ReqUser() user: RequestUser) {
+        return this.projectsService.getAllProjects(user);
     }
 
     @Auth()
-    @Get()
+    @Get(':id')
     getProject(@Param('id') id: string, @ReqUser() user: RequestUser) {
         return this.projectsService.getProject(id, user);
     }
@@ -27,18 +27,18 @@ export class ProjectsController {
     @Post()
     createProject(@Body(ValidationPipe) createProjectDto: CreateProjectDto, @ReqUser() user: RequestUser) {
         console.log("USER from token", user);
-        return this.projectsService.createProject(createProjectDto, user.sub);
+        return this.projectsService.createProject(createProjectDto, user);
     }
 
     @Auth('ADMIN', 'MANAGER')
     @Patch(':id')
     updateProject(@Param('id') id: string, @Body(ValidationPipe) updateProjectDto: UpdateProjectDto, @ReqUser() user: RequestUser) {
-        return this.projectsService.updateProject(id, updateProjectDto, user.sub);
+        return this.projectsService.updateProject(id, updateProjectDto, user);
     }
 
     @Auth('ADMIN', 'MANAGER')
     @Delete(':id')
     deleteProject(@Param('id') id: string, @ReqUser() user: RequestUser) {
-        return this.projectsService.deleteProject(id, user.sub);
+        return this.projectsService.deleteProject(id, user);
     }
 }

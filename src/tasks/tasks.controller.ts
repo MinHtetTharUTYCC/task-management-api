@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Post, Get, Param, Patch, ValidationPipe } from '@nestjs/common';
+import { Body, Controller, Delete, Post, Get, Param, Patch, ValidationPipe, HttpCode, HttpStatus, Query } from '@nestjs/common';
 import { TasksService } from './tasks.service';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { CreateTaskDto } from './dto/create-task.dto';
@@ -6,6 +6,7 @@ import { Auth } from 'src/auth/auth.decorator';
 import type { RequestUser } from 'src/auth/request-user.interface';
 import { ReqUser } from 'src/auth/req-user.decorator';
 import { UpdateTaskStatusDto } from './dto/update-task-status.dto';
+import { GetTasksDto } from './dto/get-tasks.dto';
 
 @Controller('tasks')
 export class TasksController {
@@ -19,8 +20,8 @@ export class TasksController {
 
     @Auth()
     @Get()
-    getTasks(@ReqUser() user: RequestUser) {
-        return this.taskService.getTasks(user)
+    getTasks(@Query(ValidationPipe) getTasksDto: GetTasksDto, @ReqUser() user: RequestUser) {
+        return this.taskService.getTasks(getTasksDto, user)
     }
 
     @Auth()
@@ -43,7 +44,8 @@ export class TasksController {
 
     @Auth('ADMIN', 'MANAGER')
     @Delete(':id')
+    @HttpCode(HttpStatus.NO_CONTENT)
     deleteTask(@Param('id') id: string, @ReqUser() user: RequestUser) {
-        return this.taskService.deleteTask(id, user.sub, user.role)
+        return this.taskService.deleteTask(id, user)
     }
 }

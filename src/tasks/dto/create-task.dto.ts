@@ -1,19 +1,24 @@
-import { IsNotEmpty, IsOptional, IsString, IsUUID } from "class-validator"
+import { IsDateString, IsEnum, IsNotEmpty, IsOptional } from "class-validator"
+import { TaskPriority } from "@prisma/client";
 
 export class CreateTaskDto {
     @IsNotEmpty()
-    @IsString()
     title: string;
 
     @IsOptional()
-    @IsString()
     description?: string;
 
     @IsNotEmpty()
-    @IsUUID()
     projectId: string;
 
     @IsNotEmpty()
-    @IsUUID()
     assigneeId: string;
+
+    @IsOptional()
+    @IsEnum(TaskPriority)
+    priority?: TaskPriority;
+
+    @IsOptional()
+    @IsDateString()
+    dueDate?: string;
 }

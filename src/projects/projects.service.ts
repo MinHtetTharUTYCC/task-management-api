@@ -1,13 +1,15 @@
 import { ForbiddenException, Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { DatabaseService } from 'src/database/database.service';
 import { CreateProjectDto } from './dto/create-project.dto';
-import { Project } from 'generated/prisma';
+import { Project, UserRole } from '@prisma/client';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import { RequestUser } from 'src/auth/request-user.interface';
 import { AdminProjectService } from './admin-project/admin-project.service';
 import { ManagerProjectService } from './manager-project/manager-project.service';
 import { MemberProjectService } from './member-project/member-project.service';
-
+import { handlePrismaError } from 'src/utils/handle-prisma-error';
+import { NotificationsGateway } from 'src/notifications/notifications.gateway';
+import { CreateNotificationDto } from 'src/notifications/dto/create-noti.dto';
 
 @Injectable()
 export class ProjectsService {
@@ -16,47 +18,25 @@ export class ProjectsService {
         private readonly adminProjectService: AdminProjectService,
         private readonly managerProjectService: ManagerProjectService,
         private readonly memberProjectService: MemberProjectService,
+        private readonly notificationsGateway: NotificationsGateway,
     ) { }
 
-    // (SKIP pagination, search, filter for now)
-
-    //ADMIN
-    async getAllProjects(): Promise<Project[]> {
-        try {
-            return this.databaseService.project.findMany({
-                include: {
-                    owner: { select: { id: true, email: true, username: true } },
-                    _count: {
-                        select: {
-                            members: true,
-                            tasks: true,
-                        }
-                    }
-                },
-                orderBy: {
-                    createdAt: 'desc',
-                }
-            });
-        } catch (error) {
-            console.error('Error fetching projects:', error);
-            throw new InternalServerErrorException("Failed to fetch projects");
+    //All Users
+    async getAllProjects(user: RequestUser): Promise<Project[]> {
+        switch (user.role) {
+            case UserRole.ADMIN:
+                return this.adminProjectService.getAllProjects();
+            case UserRole.MANAGER:
+                return this.managerProjectService.getAllProjects(user.sub);
+            case UserRole.MEMBER:
+                return this.memberProjectService.getAllProjects(user.sub);
+            default:
+                throw new ForbiddenException("You don't have access to this resource")
         }
     }
 
-    // ADMIN,MANAGER
-    async getCreatedProjects(ownerId: string): Promise<Project[]> {
-        try {
-            return this.databaseService.project.findMany({
-                where: { ownerId },
-            });
-        } catch (error) {
-            console.error('Error fetching projects:', error);
-            throw new InternalServerErrorException("Failed to fetch projects");
-        }
-    }
-
-    //All Authenticated users
-    async getProject(id: string, user: RequestUser): Promise<Project> {
+    //All users
+    async getProject(id: string, user: RequestUser): Promise<Project | undefined> {
         switch (user.role) {
             case 'ADMIN':
                 return this.adminProjectService.getProject(id);
@@ -70,62 +50,130 @@ export class ProjectsService {
     }
 
     // ADMIN,MANAGER
-    async createProject(createProjectDto: CreateProjectDto, ownerId: string): Promise<{ message: string }> {
+    async createProject(createProjectDto: CreateProjectDto, user: RequestUser): Promise<Project> {
         try {
-            await this.databaseService.project.create({
-                data: { ...createProjectDto, ownerId },
-            });
 
-            return { message: 'Project created successfully' };
+            const newProject = await this.databaseService.$transaction(async (tx) => {
+                const project = await tx.project.create({
+                    data: { ...createProjectDto, ownerId: user.sub },
+                });
+
+                // if (user.role as UserRole === UserRole.MANAGER) { //TOD: III
+                const admin = await tx.user.findFirst({
+                    where: { role: 'ADMIN' },
+                    select: { id: true }
+                });
+
+                if (admin) {
+                    const notificationData: CreateNotificationDto = {
+                        type: 'PROJECT_CREATED',
+                        message: `${user.username} created a new project: ${project.name}`,
+                        link: `/projects/${project.id}`,
+                        userId: admin.id,
+                    };
+
+                    await this.databaseService.notification.create({
+                        data: notificationData,
+                    });
+                    this.notificationsGateway.sendNotification(notificationData)
+                }
+                return project;
+            })
+
+            return newProject;
         } catch (error) {
-            console.error('Error creating project:', error);
             throw new InternalServerErrorException("Failed to create project");
         }
     }
 
-    async updateProject(id: string, updateProjectDto: UpdateProjectDto, ownerId: string): Promise<Project> {
+    // ADMIN,MANAGER
+    async updateProject(id: string, updateProjectDto: UpdateProjectDto, user: RequestUser): Promise<Project> {
         try {
-            const isValid = await this.validateOwnerShip(id, ownerId);
-            if (!isValid) {
-                throw new NotFoundException('Project not found');
+            if (user.role === UserRole.MANAGER) {
+                const isValid = await this.validateOwnerShip(id, user.sub);
+                if (!isValid) {
+                    throw new NotFoundException('Project not found or you do not have access to it');
+                }
             }
 
-            return this.databaseService.project.update({
-                where: { id },
-                data: updateProjectDto,
+            const project = await this.databaseService.$transaction(async (tx) => {
+                const updated = await tx.project.update({
+                    where: { id },
+                    data: updateProjectDto,
+                    include: {
+                        members: {
+                            select: {
+                                userId: true,
+                            }
+                        }
+                    }
+                });
+
+                // if (user.role as UserRole === UserRole.MANAGER) { //TOD: III
+                const admin = await tx.user.findFirst({
+                    where: { role: 'ADMIN' },
+                    select: { id: true }
+                });
+
+                const baseNotification = {
+                    type: "PROJECT_UPDATED" as const,
+                    message: `${user.username} updated project: ${updated.name}`,
+                    link: `/projects/${updated.id}`,
+                };
+
+
+                const recepients = [
+                    ...(updated.members.map(mem => mem.userId) ?? []),
+                    // ...(admin && user.role as UserRole === UserRole.MANAGER ? [admin.id] : []) //TODO: III
+                    ...(admin ? [admin.id] : [])
+                ]
+
+                await Promise.all(
+                    recepients.map(rec => {
+                        tx.notification.create({
+                            data: {
+                                ...baseNotification,
+                                userId: rec,
+                            }
+                        })
+                    })
+                )
+
+                return { updated, recepients, baseNotification };
             });
 
+            // EMIT NOTI
+            for (const recepient of project.recepients) {
+                this.notificationsGateway.sendNotification({ ...project.baseNotification, userId: recepient })
+            }
+            return project.updated;
         } catch (error) {
-            console.error('Error updateding project:', error);
-            throw new InternalServerErrorException("Failed to update project");
-
+            console.log("ERROR:", error)
+            handlePrismaError(error, "Failed to update project");
         }
     }
-    async deleteProject(id: string, ownerId: string): Promise<{ message: string }> {
-        try {
-            const isValid = await this.validateOwnerShip(id, ownerId);
-            if (!isValid) {
-                return { message: 'Project not found' };
-            }
 
+
+    async deleteProject(id: string, user: RequestUser): Promise<{ message: string }> {
+        try {
+            if (user.role === UserRole.MANAGER) {
+                const isValid = await this.validateOwnerShip(id, user.sub);
+                if (!isValid) {
+                    throw new NotFoundException('Project not found or you do not have access to it');
+                }
+            }
             await this.databaseService.project.delete({
                 where: { id },
             });
+
             return { message: 'Project deleted successfully' };
         } catch (error) {
-            console.error('Error deleting project:', error);
-            throw new InternalServerErrorException("Failed to delete project");
+            handlePrismaError(error, "Failed to delete project");
 
         }
     }
 
-    private async projectExists(id: string): Promise<boolean> {
-        const project = await this.databaseService.project.findUnique({
-            where: { id },
-            select: { id: true }
-        });
-        return !!project;
-    }
+
     private async validateOwnerShip(id: string, ownerId: string): Promise<boolean> {
         const project = await this.databaseService.project.findUnique({
             where: { id, ownerId },
