@@ -23,20 +23,19 @@ export class ProjectsController {
         return this.projectsService.getProject(id, user);
     }
 
-    @Auth('ADMIN', 'MANAGER')
+    @Auth('MANAGER')
     @Post()
     createProject(@Body(ValidationPipe) createProjectDto: CreateProjectDto, @ReqUser() user: RequestUser) {
-        console.log("USER from token", user);
         return this.projectsService.createProject(createProjectDto, user);
     }
 
-    @Auth('ADMIN', 'MANAGER')
+    @Auth('MANAGER')
     @Patch(':id')
     updateProject(@Param('id') id: string, @Body(ValidationPipe) updateProjectDto: UpdateProjectDto, @ReqUser() user: RequestUser) {
         return this.projectsService.updateProject(id, updateProjectDto, user);
     }
 
-    @Auth('ADMIN', 'MANAGER')
+    @Auth('MANAGER')
     @Delete(':id')
     deleteProject(@Param('id') id: string, @ReqUser() user: RequestUser) {
         return this.projectsService.deleteProject(id, user);

@@ -94,7 +94,6 @@ export class CommentsService {
                     })
                 }
 
-
                 //create notis
                 const notifications = await Promise.all(
                     recepients.map(r =>

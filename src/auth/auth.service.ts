@@ -4,17 +4,13 @@ import { LoginDto } from './dto/login.dto';
 import * as bcrypt from "bcrypt";
 import { JwtService } from "@nestjs/jwt"
 import { DatabaseService } from 'src/database/database.service';
+import { Response } from 'express';
 
 
 @Injectable()
 export class AuthService {
 
     constructor(private readonly databaseService: DatabaseService, private readonly jwtService: JwtService) { }
-
-    // testing purpose
-    async getAllUsers() {
-        return this.databaseService.user.findMany();
-    }
 
     async register(registerDto: RegisterDto) {
         const existingUser = await this.databaseService.user.findUnique({
@@ -47,7 +43,7 @@ export class AuthService {
         };
     }
 
-    async login(loginDto: LoginDto) {
+    async login(loginDto: LoginDto, res?: Response) {
         const existingUser = await this.databaseService.user.findUnique({
             where: {
                 email: loginDto.email,
@@ -66,9 +62,33 @@ export class AuthService {
         if (!isPwdValid) {
             throw new BadRequestException("Invalid credentials");
         }
-        const payload = { sub: existingUser.id, email: existingUser.email, username: existingUser.username, role: existingUser.role };
+        const payload = {
+            sub: existingUser.id,
+            email: existingUser.email,
+            username: existingUser.username,
+            role: existingUser.role
+        };
 
-        return { access_token: await this.jwtService.signAsync(payload) }
+        const token = await this.jwtService.signAsync(payload);
+
+        if (res) {
+            res.cookie('jwt', token, {
+                httpOnly: true,
+                secure: process.env.NODE_ENV === 'production',
+                sameSite: 'strict',
+                maxAge: 10 * 60 * 60 * 1000,//10 hours
+            });
+        }
+
+        return {
+            access_token: token,
+            user: {
+                id: existingUser.id,
+                username: existingUser.username,
+                email: existingUser.email,
+                role: existingUser.role,
+            }
+        }
     }
 
 }

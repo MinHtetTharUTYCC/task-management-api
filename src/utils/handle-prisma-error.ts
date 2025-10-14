@@ -15,7 +15,7 @@ export function handlePrismaError(error: any, contextMessage = "Operation failed
         }
     }
 
-    // 2️⃣ Known NestJS exceptions (rethrow them)
+    // so, Known NestJS exceptions (rethrow them)
     if (
         error instanceof BadRequestException ||
         error instanceof ForbiddenException ||

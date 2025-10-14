@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { DatabaseService } from 'src/database/database.service';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { Project, UserRole } from '@prisma/client';
@@ -49,7 +49,7 @@ export class ProjectsService {
         }
     }
 
-    // ADMIN,MANAGER
+    // MANAGER
     async createProject(createProjectDto: CreateProjectDto, user: RequestUser): Promise<Project> {
         try {
 
@@ -58,7 +58,6 @@ export class ProjectsService {
                     data: { ...createProjectDto, ownerId: user.sub },
                 });
 
-                // if (user.role as UserRole === UserRole.MANAGER) { //TOD: III
                 const admin = await tx.user.findFirst({
                     where: { role: 'ADMIN' },
                     select: { id: true }
@@ -86,15 +85,10 @@ export class ProjectsService {
         }
     }
 
-    // ADMIN,MANAGER
+    // MANAGER
     async updateProject(id: string, updateProjectDto: UpdateProjectDto, user: RequestUser): Promise<Project> {
         try {
-            if (user.role === UserRole.MANAGER) {
-                const isValid = await this.validateOwnerShip(id, user.sub);
-                if (!isValid) {
-                    throw new NotFoundException('Project not found or you do not have access to it');
-                }
-            }
+            await this.validateOwnerShip(id, user.sub);
 
             const project = await this.databaseService.$transaction(async (tx) => {
                 const updated = await tx.project.update({
@@ -109,7 +103,6 @@ export class ProjectsService {
                     }
                 });
 
-                // if (user.role as UserRole === UserRole.MANAGER) { //TOD: III
                 const admin = await tx.user.findFirst({
                     where: { role: 'ADMIN' },
                     select: { id: true }
@@ -124,7 +117,6 @@ export class ProjectsService {
 
                 const recepients = [
                     ...(updated.members.map(mem => mem.userId) ?? []),
-                    // ...(admin && user.role as UserRole === UserRole.MANAGER ? [admin.id] : []) //TODO: III
                     ...(admin ? [admin.id] : [])
                 ]
 
@@ -153,15 +145,11 @@ export class ProjectsService {
         }
     }
 
-
+    // Manager
     async deleteProject(id: string, user: RequestUser): Promise<{ message: string }> {
         try {
-            if (user.role === UserRole.MANAGER) {
-                const isValid = await this.validateOwnerShip(id, user.sub);
-                if (!isValid) {
-                    throw new NotFoundException('Project not found or you do not have access to it');
-                }
-            }
+            await this.validateOwnerShip(id, user.sub);
+
             await this.databaseService.project.delete({
                 where: { id },
             });
@@ -174,11 +162,18 @@ export class ProjectsService {
     }
 
 
-    private async validateOwnerShip(id: string, ownerId: string): Promise<boolean> {
+    private async validateOwnerShip(id: string, ownerId: string): Promise<void> {
         const project = await this.databaseService.project.findUnique({
             where: { id, ownerId },
-            select: { id: true }
+            select: { id: true, ownerId: true }
         });
-        return !!project;
+        if (!project) {
+            throw new NotFoundException('Project not found')
+        }
+        if (project.ownerId !== ownerId) {
+            throw new BadRequestException('You do not have access to the project');
+
+        }
+
     }
 }

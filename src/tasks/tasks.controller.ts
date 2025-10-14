@@ -12,7 +12,7 @@ import { GetTasksDto } from './dto/get-tasks.dto';
 export class TasksController {
     constructor(private readonly taskService: TasksService) { }
 
-    @Auth('ADMIN', 'MANAGER')
+    @Auth('MANAGER')
     @Post()
     createTask(@Body(ValidationPipe) createTaskDto: CreateTaskDto, @ReqUser() user: RequestUser) {
         return this.taskService.createTask(createTaskDto, user.sub)
@@ -30,19 +30,19 @@ export class TasksController {
         return this.taskService.getTask(id, user)
     }
 
-    @Auth('ADMIN', 'MANAGER')
+    @Auth('MANAGER')
     @Patch(':id')
     updateTask(@Param('id') id: string, @Body(ValidationPipe) updateTaskDto: UpdateTaskDto, @ReqUser() user: RequestUser) {
         return this.taskService.updateTask(id, updateTaskDto, user)
     }
 
-    @Auth()
+    @Auth('MANAGER', 'MEMBER')
     @Patch(':id/status')
     updateTaskStatus(@Param('id') id: string, @Body(ValidationPipe) updateTaskStatusDto: UpdateTaskStatusDto, @ReqUser() user: RequestUser) {
         return this.taskService.updateTaskStatus(id, updateTaskStatusDto, user)
     }
 
-    @Auth('ADMIN', 'MANAGER')
+    @Auth('MANAGER')
     @Delete(':id')
     @HttpCode(HttpStatus.NO_CONTENT)
     deleteTask(@Param('id') id: string, @ReqUser() user: RequestUser) {

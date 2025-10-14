@@ -58,7 +58,7 @@ export class TasksService {
         }
     }
 
-    // ADMIN_MANAGER
+    //MANAGER
     async createTask(createTaskDto: CreateTaskDto, creatorId: string): Promise<Task> {
         try {
             const [task, createNotificationDto] = await this.databaseService.$transaction(async (tx) => {
@@ -91,19 +91,17 @@ export class TasksService {
         }
     }
 
-    // ADMIN_MANAGER
+    // MANAGER
     async updateTask(id: string, updateTaskDto: UpdateTaskDto, user: RequestUser): Promise<Task> {
         this.validateTaskId(id);
 
         try {
             const task = await this.validateTask(id);
             const isCreator = task.creatorId === user.sub;
-            const isAdmin = user.role === 'ADMIN';
 
-            if (!isCreator && !isAdmin) {
+            if (!isCreator) {
                 throw new ForbiddenException(`You cannot update this task`)
             }
-
 
             const taskUpdate = await this.databaseService.$transaction(async (tx) => {
                 const task = await tx.task.update({
@@ -111,29 +109,19 @@ export class TasksService {
                     data: updateTaskDto,
                 });
 
-                const baseNotification: { type: NotificationType, link: string } = {
+                const createNotificationDto: CreateNotificationDto = {
+                    message: "A task assigned to you has been updated",
                     type: NotificationType.TASK_UPDATED,
                     link: `/tasks/${task.id}`,
+                    userId: task.assigneeId,
                 }
 
-                const recepients: { role: string, id: string, message: string }[] = [
-                    { role: "assignee", id: task.assigneeId, message: "A task assigned to you has been updated" },
-                ]
-                if (isAdmin && !isCreator) {
-                    recepients.push({ role: "manager", id: task.creatorId, message: "Admin updated your task" })
-                }
+                const notification = await this.notificationService.createNotification(createNotificationDto)
 
-                const notifications = await Promise.all(
-                    recepients.map((rec) =>
-                        this.notificationService.createNotification({ ...baseNotification, message: rec.message, userId: rec.id })
-                    )
-                )
-                return { task, notifications };
+                return { task, notification };
             });
 
-            for (const notification of taskUpdate.notifications) {
-                this.notificationsGateway.sendNotification(notification)
-            }
+            this.notificationsGateway.sendNotification(taskUpdate.notification)
 
             return taskUpdate.task;
 
@@ -142,17 +130,21 @@ export class TasksService {
         }
     }
 
-    //All Authenticated Users
+    //Manager_Member
     async updateTaskStatus(id: string, updateTaskStatusDto: UpdateTaskStatusDto, user: RequestUser): Promise<{ newStatus: TaskStatus }> {
         this.validateTaskId(id);
         try {
             const existingTask = await this.validateTask(id);
             const isAssignee = existingTask.assigneeId === user.sub;
             const isCreator = existingTask.creatorId === user.sub;
-            const isAdmin = user.role === 'ADMIN';
 
-            if (!isAssignee && !isCreator && !isAdmin) {
+            if (!isAssignee && !isCreator) {
                 throw new ForbiddenException(`You cannot update this task status`)
+            }
+
+            if (isAssignee && updateTaskStatusDto.status === "OPEN") {
+                throw new ForbiddenException("You cannot change status to 'OPEN'")
+
             }
 
             const taskUpdate = await this.databaseService.$transaction(async (tx) => {
@@ -162,20 +154,34 @@ export class TasksService {
                     select: { status: true }
                 });
 
+
+                let notiType: NotificationType;
+                switch (updateTaskStatusDto.status) {
+                    case "OPEN":
+                        notiType = NotificationType.TASK_OPEN;
+                        break;
+                    case "IN_PROGRESS":
+                        notiType = NotificationType.TASK_IN_PROGRESS;
+                        break;
+                    case "DONE":
+                        notiType = NotificationType.TASK_COMPLETED;
+                        break;
+                    default:
+                        throw new BadRequestException("Invalid status");
+                }
+
                 const createNotificationDto: CreateNotificationDto = {
                     message: `Task status updated to ${updateTaskStatusDto.status}`,
-                    type: updateTaskStatusDto.status === "DONE" ? NotificationType.TASK_COMPLETED : NotificationType.TASK_UPDATED,
+                    type: notiType,
                     link: `/tasks/${id}`,
                     userId: isAssignee ? existingTask.creatorId : existingTask.assigneeId,
                 };
 
-                //if admin update, do not notify to manager
                 const notification = await this.notificationService.createNotification(createNotificationDto);
 
                 return { task, notification }
             });
 
-            //if admin updates, do not notify to manager
             this.notificationsGateway.sendNotification(taskUpdate.notification)
 
             return { newStatus: taskUpdate.task.status };
@@ -184,12 +190,12 @@ export class TasksService {
         }
     }
 
-    // ADMIN_MANAGER
+    // MANAGER
     async deleteTask(id: string, user: RequestUser): Promise<{ message: string }> {
         this.validateTaskId(id);
 
         try {
-            await this.validateTaskAndCreatorship(id, user.sub, user.role as UserRole)
+            await this.validateTaskAndCreatorship(id, user.sub)
             await this.databaseService.task.delete({
                 where: {
                     id
@@ -198,6 +204,33 @@ export class TasksService {
             return { message: "Task deleted successfully" }
         } catch (error) {
             handlePrismaError(error, "Failed to delete task")
+        }
+    }
+
+    async findDueTasks(): Promise<Pick<Task, 'id' | 'title' | 'assigneeId'>[]> {
+        try {
+            const now = new Date();
+            const oneDayFromNow = new Date(now.getTime() + (24 * 60 * 60 * 1000));
+
+            return this.databaseService.task.findMany({
+                where: {
+                    status: {
+                        not: "DONE",
+                    },
+                    dueDate: {
+                        gte: now,
+                        lte: oneDayFromNow,
+                    }
+                },
+                select: {
+                    id: true,
+                    title: true,
+                    assigneeId: true,
+                }
+            })
+
+        } catch (error) {
+            handlePrismaError(error, "Failed to get tasks")
         }
     }
 
@@ -214,7 +247,7 @@ export class TasksService {
 
 
     //helpers
-    async validateTaskAndCreatorship(id: string, creatorId: string, role: UserRole): Promise<void> {
+    async validateTaskAndCreatorship(id: string, creatorId: string): Promise<void> {
         const task = await this.databaseService.task.findUnique({
             where: { id },
             select: {
@@ -223,20 +256,11 @@ export class TasksService {
             }
         })
         if (!task) throw new NotFoundException(`Task not found`)
-        if (role !== 'ADMIN' && task.creatorId !== creatorId) {
+        if (task.creatorId !== creatorId) {
             throw new ForbiddenException(`You cannot access this task`)
         }
     }
 
-    async validateTaskAssigneeship(id: string, assigneeId: string): Promise<void> {
-        const task = await this.databaseService.task.findUnique({
-            where: { id, assigneeId },
-            select: {
-                id: true,
-            }
-        })
-        if (!task) throw new NotFoundException(`Task with ID ${id} not found or you don't have access to it`)
-    }
 
     async validateTask(id: string): Promise<{ assigneeId: string, creatorId: string }> {
         const task = await this.databaseService.task.findUnique({

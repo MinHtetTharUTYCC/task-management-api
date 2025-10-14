@@ -23,8 +23,6 @@ model User {
   password String
   role     UserRole @default(MEMBER)
 
-  createdAt DateTime @default(now())
-
   projectsOwned         Project[]       @relation("ProjectOwner")
   projectsParticipating ProjectMember[]
 
@@ -33,6 +31,8 @@ model User {
 
   comments      Comment[]
   notifications Notification[]
+
+  createdAt DateTime @default(now())
 }
 
 model Project {
@@ -135,6 +135,9 @@ enum NotificationType {
   // to admin
   PROJECT_CREATED
 
+  //to manager,user
+  ROLE_CHANGED
+
   // to assignee
   // manager(if admin updates the project)
   PROJECT_UPDATED
@@ -143,7 +146,8 @@ enum NotificationType {
   TASK_ASSIGNED
   TASK_UPDATED
 
-  // to manager
+  TASK_OPEN
+  TASK_IN_PROGRESS
   TASK_COMPLETED
   COMMENT_ADDED
 

@@ -10,5 +10,6 @@ import { NotificationsModule } from 'src/notifications/notifications.module';
     imports: [NotificationsModule],
     providers: [TasksService, AdminTaskService, ManagerTaskService, MemberTaskService],
     controllers: [TasksController],
+    exports: [TasksService]
 })
 export class TasksModule { }
