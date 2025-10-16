@@ -10,6 +10,8 @@ import { MemberProjectService } from './member-project/member-project.service';
 import { handlePrismaError } from 'src/utils/handle-prisma-error';
 import { NotificationsGateway } from 'src/notifications/notifications.gateway';
 import { CreateNotificationDto } from 'src/notifications/dto/create-noti.dto';
+import { PaginatedProjectResponse, ProjectDetailsResponse } from './dto/project-response.dto';
+import { GetProjectsDto } from './dto/get-projects.dto';
 
 @Injectable()
 export class ProjectsService {
@@ -22,21 +24,21 @@ export class ProjectsService {
     ) { }
 
     //All Users
-    async getAllProjects(user: RequestUser): Promise<Project[]> {
+    async getAllProjects(getProjectsDto: GetProjectsDto, user: RequestUser): Promise<PaginatedProjectResponse> {
         switch (user.role) {
             case UserRole.ADMIN:
-                return this.adminProjectService.getAllProjects();
+                return this.adminProjectService.getAllProjects(getProjectsDto);
             case UserRole.MANAGER:
-                return this.managerProjectService.getAllProjects(user.sub);
+                return this.managerProjectService.getAllProjects(getProjectsDto, user.sub);
             case UserRole.MEMBER:
-                return this.memberProjectService.getAllProjects(user.sub);
+                return this.memberProjectService.getAllProjects(getProjectsDto, user.sub);
             default:
                 throw new ForbiddenException("You don't have access to this resource")
         }
     }
 
     //All users
-    async getProject(id: string, user: RequestUser): Promise<Project | undefined> {
+    async getProject(id: string, user: RequestUser): Promise<ProjectDetailsResponse> {
         switch (user.role) {
             case 'ADMIN':
                 return this.adminProjectService.getProject(id);

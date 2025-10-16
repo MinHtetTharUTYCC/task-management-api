@@ -2,7 +2,7 @@ import { BadRequestException, ForbiddenException, Injectable, InternalServerErro
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { DatabaseService } from 'src/database/database.service';
-import { NotificationType, Task, TaskStatus, UserRole } from '@prisma/client';
+import { NotificationType, Task, TaskStatus } from '@prisma/client';
 import { UpdateTaskStatusDto } from './dto/update-task-status.dto';
 import { RequestUser } from 'src/auth/request-user.interface';
 import { AdminTaskService } from './admin-task/admin-task.service';
@@ -13,6 +13,7 @@ import { NotificationsService } from 'src/notifications/notifications.service';
 import { CreateNotificationDto } from 'src/notifications/dto/create-noti.dto';
 import { NotificationsGateway } from 'src/notifications/notifications.gateway';
 import { handlePrismaError } from 'src/utils/handle-prisma-error';
+import { PaginatedTaskResponse, TaskDetailsResponse } from './dto/task-response.dto';
 
 @Injectable()
 export class TasksService {
@@ -28,7 +29,7 @@ export class TasksService {
     ) { }
 
     //ALL autehnticated Users
-    async getTasks(getTasksDto: GetTasksDto, user: RequestUser) {
+    async getTasks(getTasksDto: GetTasksDto, user: RequestUser): Promise<PaginatedTaskResponse> {
 
         switch (user.role) {
             case 'ADMIN':
@@ -43,7 +44,7 @@ export class TasksService {
     }
 
     // All Authenticated Users
-    async getTask(id: string, user: RequestUser) {
+    async getTask(id: string, user: RequestUser): Promise<TaskDetailsResponse> {
         this.validateTaskId(id);
 
         switch (user.role) {

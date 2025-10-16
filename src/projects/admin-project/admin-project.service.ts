@@ -1,6 +1,8 @@
 import { Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
-import { Project } from 'generated/prisma';
 import { DatabaseService } from 'src/database/database.service';
+import { PaginatedProjectResponse, ProjectDetailsResponse } from '../dto/project-response.dto';
+import { GetProjectsDto } from '../dto/get-projects.dto';
+import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class AdminProjectService {
@@ -8,35 +10,78 @@ export class AdminProjectService {
         private readonly databaseService: DatabaseService,
     ) { }
 
-    async getAllProjects(): Promise<Project[]> {
+    async getAllProjects(getProjectsDto: GetProjectsDto): Promise<PaginatedProjectResponse> {
+        const { page = 1, pageSize = 10, sortBy } = getProjectsDto;
+        const skip = (page - 1) * pageSize;
+
+        const orderBy: Prisma.ProjectOrderByWithRelationInput = {
+            ...(sortBy ? { createdAt: sortBy } : { createdAt: 'desc' })
+        }
+
         try {
-            return this.databaseService.project.findMany({
-                include: {
-                    owner: { select: { id: true, username: true } },
-                    _count: {
-                        select: {
-                            members: true,
-                            tasks: true,
+            const [projects, total] = await Promise.all([
+                this.databaseService.project.findMany({
+                    include: {
+                        owner: { select: { id: true, username: true } },
+                        _count: {
+                            select: {
+                                members: true,
+                                tasks: true,
+                            }
                         }
-                    }
-                },
-                orderBy: {
-                    createdAt: 'desc',
-                }
-            });
+                    },
+                    skip,
+                    take: pageSize,
+                    orderBy,
+                }),
+                this.databaseService.project.count({}),
+            ])
+
+            return {
+                projects,
+                total,
+                page,
+                pageSize,
+                totalPages: Math.ceil(total / pageSize),
+            }
         } catch (error) {
             throw new InternalServerErrorException("Failed to fetch projects");
         }
     }
-    async getProject(id: string) {
 
+
+    async getProject(id: string): Promise<ProjectDetailsResponse> {
         try {
             const project = await this.databaseService.project.findUnique({
                 where: { id },
                 include: {
-                    members: true,
-                    owner: true,
-                    tasks: true,
+                    members: {
+                        select: {
+                            id: true,
+                            userId: true,
+                            user: {
+                                select: {
+                                    username: true
+                                }
+                            }
+                        }
+                    },
+                    owner: {
+                        select: {
+                            id: true,
+                            username: true,
+                        }
+                    },
+                    tasks: {
+                        select: {
+                            id: true,
+                            title: true,
+                            description: true,
+                            status: true,
+                            priority: true,
+                            createdAt: true,
+                        }
+                    },
                 }
             });
             if (!project) {
