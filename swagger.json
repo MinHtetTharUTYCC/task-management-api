@@ -688,13 +688,44 @@
     },
     "/notifications": {
       "get": {
+        "description": "Return notifications for requested user",
         "operationId": "NotificationsController_getNotifications",
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "pageSize",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 100,
+              "default": 10,
+              "type": "number"
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": ""
+            "description": "Notifications retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedNotificationResponse"
+                }
+              }
+            }
           }
         },
+        "summary": "Get all notifications",
         "tags": [
           "Notifications"
         ]
@@ -999,13 +1030,57 @@
     },
     "/users": {
       "get": {
+        "description": "Return all users for admin",
         "operationId": "UsersController_getAllUsers",
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "pageSize",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 100,
+              "default": 10,
+              "type": "number"
+            }
+          },
+          {
+            "name": "role",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ADMIN",
+                "MANAGER",
+                "MEMBER"
+              ]
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": ""
+            "description": "Users retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedUserResponse"
+                }
+              }
+            }
           }
         },
+        "summary": "Get all users",
         "tags": [
           "Users"
         ]
@@ -1440,6 +1515,88 @@
           }
         }
       },
+      "NotificationListItem": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "PROJECT_CREATED",
+              "ROLE_CHANGED",
+              "PROJECT_UPDATED",
+              "TASK_ASSIGNED",
+              "TASK_UPDATED",
+              "TASK_OPEN",
+              "TASK_IN_PROGRESS",
+              "TASK_COMPLETED",
+              "COMMENT_ADDED",
+              "DUE_SOON"
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "link": {
+            "type": "string"
+          },
+          "read": {
+            "type": "boolean"
+          },
+          "userId": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "message",
+          "link",
+          "read",
+          "userId",
+          "createdAt"
+        ]
+      },
+      "PaginatedNotificationResponse": {
+        "type": "object",
+        "properties": {
+          "notifications": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NotificationListItem"
+            }
+          },
+          "total": {
+            "type": "number"
+          },
+          "page": {
+            "type": "number"
+          },
+          "pageSize": {
+            "type": "number"
+          },
+          "totalPages": {
+            "type": "number"
+          },
+          "unreadCount": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "notifications",
+          "total",
+          "page",
+          "pageSize",
+          "totalPages",
+          "unreadCount"
+        ]
+      },
       "CreateNotificationDto": {
         "type": "object",
         "properties": {}
@@ -1677,6 +1834,69 @@
       "UpdateCommentDto": {
         "type": "object",
         "properties": {}
+      },
+      "UserListItem": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "ADMIN",
+              "MANAGER",
+              "MEMBER"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "username",
+          "email",
+          "role",
+          "createdAt"
+        ]
+      },
+      "PaginatedUserResponse": {
+        "type": "object",
+        "properties": {
+          "users": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UserListItem"
+            }
+          },
+          "total": {
+            "type": "number"
+          },
+          "page": {
+            "type": "number"
+          },
+          "pageSize": {
+            "type": "number"
+          },
+          "totalPages": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "users",
+          "total",
+          "page",
+          "pageSize",
+          "totalPages"
+        ]
       },
       "UpdateUserRoleDto": {
         "type": "object",

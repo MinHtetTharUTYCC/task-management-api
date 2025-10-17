@@ -1,11 +1,11 @@
 import { Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { DatabaseService } from 'src/database/database.service';
 import { GetUsersDto } from './dto/get-users.dto';
-import { NotificationType, User, UserRole } from '@prisma/client';
+import { NotificationType, Prisma, UserRole } from '@prisma/client';
 import { handlePrismaError } from 'src/utils/handle-prisma-error';
 import { UpdateUserRoleDto } from './dto/update-user-role.dto';
 import { NotificationsService } from 'src/notifications/notifications.service';
-import { exclude } from 'src/utils/exclude';
+import { PaginatedUserResponse } from './dto/user-response.dto';
 
 @Injectable()
 export class UsersService {
@@ -15,29 +15,38 @@ export class UsersService {
     ) { }
 
     //Admin
-    async getAllUsers(getUsersDto: GetUsersDto): Promise<Omit<User, 'password'>[]> {
-        try {
-            const users = await this.databaseService.user.findMany({
-                where: {
-                    role: getUsersDto.role
-                        ?
-                        getUsersDto.role
-                        : {
-                            not: 'ADMIN',
-                        }
-                },
-                orderBy: {
-                    createdAt: getUsersDto.sortBy ?? "desc",
-                }
-            });
+    async getAllUsers(getUsersDto: GetUsersDto, userId: string): Promise<PaginatedUserResponse> {
+        const { page = 1, pageSize = 10, role, sortBy } = getUsersDto;
+        const skip = (page - 1) * pageSize;
 
-            const usersWithoutPwd = users.map(user => exclude(user, ['password']))
-            console.log("www:", usersWithoutPwd)
-            return usersWithoutPwd;
+        const where: Prisma.UserWhereInput = {
+            ...(role ? { role: getUsersDto.role } : { role: { not: 'ADMIN' } }),
+            ...{ id: { not: userId } }
+        }
+
+        try {
+            const [users, total] = await Promise.all([
+                this.databaseService.user.findMany({
+                    where,
+                    skip,
+                    take: pageSize,
+                    orderBy: {
+                        createdAt: sortBy ?? "desc",
+                    }
+                }),
+                this.databaseService.user.count({ where })
+            ]);
+
+            return {
+                users,
+                total,
+                page,
+                pageSize,
+                totalPages: Math.ceil(total / pageSize)
+            };
 
         } catch (error) {
-            throw new InternalServerErrorException("Failed to get users")
-
+            throw new InternalServerErrorException("Failed to get users");
         }
     }
 

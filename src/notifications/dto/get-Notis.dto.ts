@@ -1,9 +1,8 @@
 import { ApiPropertyOptional } from "@nestjs/swagger";
-import { UserRole } from "@prisma/client";
 import { Type } from "class-transformer";
-import { IsEnum, IsIn, IsInt, IsOptional, IsString, Min } from "class-validator";
+import { IsInt, IsOptional, Min } from "class-validator";
 
-export class GetUsersDto {
+export class GetNotisDto {
     @ApiPropertyOptional({ minimum: 1, default: 1 })
     @IsOptional()
     @Type(() => Number)
@@ -17,15 +16,4 @@ export class GetUsersDto {
     @IsInt()
     @Min(1)
     pageSize?: number;
-
-    @ApiPropertyOptional({ enum: UserRole, required: false })
-    @IsOptional()
-    @IsEnum(UserRole)
-    role?: UserRole;
-
-    @IsOptional()
-    @IsIn(['desc', "asc"])
-    sortBy?: "desc" | "asc"
-
-
 }

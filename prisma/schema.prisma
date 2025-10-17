@@ -139,7 +139,6 @@ enum NotificationType {
   ROLE_CHANGED
 
   // to assignee
-  // manager(if admin updates the project)
   PROJECT_UPDATED
 
   // to assignee
